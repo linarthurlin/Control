@@ -47,6 +47,12 @@ import os
 import select
 import sys
 import threading
+import time
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 import rclpy
 import rclpy.duration
@@ -267,14 +273,15 @@ class WaypointRecorderNavigator(Node):
     # Keyboard input
     # ------------------------------------------------------------------
     def _keyboard_loop(self):
+        buf = ''
         while rclpy.ok():
-            ready, _, _ = select.select([sys.stdin], [], [], 0.5)
-            if not ready:
-                continue
             try:
-                key = sys.stdin.readline().strip().upper()
-            except (EOFError, OSError):
+                key, buf = self._read_keyline(buf)
+            except (EOFError, OSError, KeyboardInterrupt):
                 break
+
+            if not key:
+                continue
 
             if key == 'S':
                 self._stop_recording()
@@ -284,6 +291,23 @@ class WaypointRecorderNavigator(Node):
                 self.get_logger().info('Quit requested.')
                 rclpy.try_shutdown()
                 break
+
+    def _read_keyline(self, buf: str):
+        if msvcrt is not None:
+            if msvcrt.kbhit():
+                ch = msvcrt.getwch()
+                if ch in ('\r', '\n'):
+                    return buf.strip().upper(), ''
+                if ch == '\x03':
+                    raise KeyboardInterrupt
+                return None, buf + ch
+            time.sleep(0.1)
+            return None, buf
+
+        ready, _, _ = select.select([sys.stdin], [], [], 0.5)
+        if not ready:
+            return None, buf
+        return sys.stdin.readline().strip().upper(), buf
 
     # ------------------------------------------------------------------
     # Stop recording & save
